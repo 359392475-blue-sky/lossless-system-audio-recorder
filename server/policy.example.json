@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "product": "lossless-system-audio-recorder",
+  "sequence": 1,
+  "level": 0,
+  "minimumBuild": 5,
+  "effectiveAt": 0,
+  "latestBuild": 5,
+  "title": "版本验证",
+  "message": "当前版本可用。",
+  "downloadURL": "https://replace-before-release.example/download?channel=other"
+}

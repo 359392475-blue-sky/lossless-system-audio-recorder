@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-	<string>3.0.0</string>
+	<string>3.1.0</string>
     <key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
@@ -30,6 +30,18 @@
     <string>本工具只录制 Mac 正在播放的系统声音，并在本地导出无损 MP4；不会录制麦克风。</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

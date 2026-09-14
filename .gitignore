@@ -7,3 +7,12 @@ dist/
 *.dmg
 *.log
 *.xcuserstate
+__pycache__/
+.env
+.env.*
+*.pem
+*.key
+*.sqlite
+*.sqlite-*
+server/data/
+*.local.json

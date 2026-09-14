@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: RecorderViewModel
+    @State private var dismissedPolicySequence: Int?
 
     var body: some View {
         ZStack {
@@ -16,12 +17,54 @@ struct ContentView: View {
                 header
                 statusCard
                 controls
+                policyNotice
                 footer
             }
             .padding(28)
         }
-        .frame(width: 470, height: 430)
+        .frame(width: 470)
+        .frame(minHeight: 430)
         .preferredColorScheme(.dark)
+        .task { await model.refreshPolicy() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshPolicy() }
+        }
+    }
+
+    @ViewBuilder
+    private var policyNotice: some View {
+        if model.checkingPolicy {
+            HStack { ProgressView().controlSize(.small); Text("正在联网验证版本…").font(.caption) }
+        }
+        if let error = model.policyError {
+            VStack(spacing: 8) {
+                Text(error).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center)
+                Button("重新验证") { Task { await model.refreshPolicy() } }
+            }
+        }
+        if let policy = model.policy, policy.level > 0,
+           policy.level >= 3 || dismissedPolicySequence != policy.sequence {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(policy.title).font(policy.level >= 2 ? .headline : .subheadline)
+                Text(policy.message).font(.caption)
+                if policy.level == 3 {
+                    Text("旧版本使用期限：" + Date(timeIntervalSince1970: Double(policy.effectiveAt)).formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                }
+                if policy.blocksRecording(at: Date()) {
+                    Text("需升级后才能开始新录音；已有录音可以保存。").font(.caption).bold()
+                }
+                HStack {
+                    Button("下载升级版本") { model.openPolicyDownload() }
+                    if policy.level <= 2 {
+                        Button("暂不提醒") { dismissedPolicySequence = policy.sequence }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background((policy.level >= 2 ? Color.orange : Color.blue).opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     private var header: some View {
@@ -119,9 +162,10 @@ struct ContentView: View {
         HStack(spacing: 12) {
             switch model.phase {
             case .idle:
-                primaryButton("开始录制", icon: "record.circle", tint: .purple, action: model.start)
+                primaryButton(model.updateInProgress ? "正在准备更新…" : "开始录制", icon: "record.circle", tint: .purple, action: model.start)
+                    .disabled(model.updateInProgress)
             case .preparing:
-                primaryButton("正在检查权限…", icon: "lock.shield", tint: .gray, action: {})
+                primaryButton(model.checkingPolicy ? "正在联网验证…" : "正在检查权限…", icon: "lock.shield", tint: .gray, action: {})
                     .disabled(true)
             case .countingDown:
                 primaryButton("取消", icon: "xmark.circle", tint: .gray, action: model.cancelCountdown)
@@ -140,21 +184,25 @@ struct ContentView: View {
                         .controlSize(.large)
                         .tint(.purple)
                 }
-                Button("再次录制") { model.recordAgain() }
+                Button(model.updateInProgress ? "更新待安装" : "再次录制") { model.recordAgain() }
+                    .disabled(model.updateInProgress)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .tint(.purple)
             case .failed:
+                if model.hasPendingRecording { Button("再次导出") { model.exportAgain() } }
                 Button("打开权限设置") { model.openScreenRecordingSettings() }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                Button("重新尝试") { model.start() }
+                Button(model.updateInProgress ? "更新待安装" : "重新尝试") { model.start() }
+                    .disabled(model.updateInProgress)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .tint(.purple)
             }
         }
         .frame(minHeight: 40)
+
     }
 
     private func primaryButton(
@@ -206,9 +254,9 @@ struct ContentView: View {
     private var secondaryStatus: String {
         switch model.phase {
         case .idle:
-            return "点开始后倒计时 3 秒。首次使用请允许系统音频录制。"
+            return "每次录音需要联网验证版本，再倒计时 3 秒。首次使用请允许系统音频录制。"
         case .preparing:
-            return "正在向 macOS 请求系统音频采集权限"
+            return model.checkingPolicy ? "每次录制都需要在线验证当前版本" : "正在向 macOS 请求系统音频采集权限"
         case .countingDown:
             return "倒计时结束后开始记录系统播放声音"
         case .recording:

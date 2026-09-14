@@ -1,21 +1,34 @@
-MIT License
+无损系统录音机 — 软件使用许可（3.1 及以后本项目新增内容）
+Copyright (c) 2026 BlueSky. All rights reserved.
+生效版本：3.1.0，2026-09-14。
 
-Copyright (c) 2026 BlueSky
+一、授权范围
+对本版本中权利人有权以本许可授权的代码和官方应用，权利人授予用户
+非独占、不可转让的有限使用许可，以官方版本、当时明确提供的免费或
+已购买功能及相应有效期限为限。软件可以商业发行，本许可不承诺永久免费。
+未另获权利人书面许可，不授予新增受本许可约束内容的修改、再分发、
+出售、再许可或据以发布衍生应用的权利；法律强制允许的行为除外。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+二、联网验证与版本支持
+本版本每次开始录音需要联网验证版本，关闭更新提醒不会关闭版本验证。
+验证失败、服务不可用或版本低于当时允许的最低版本时，无法开始新录音。
+权利人可发布普通提醒、限期升级或停止旧版本新任务的策略，并应明确说明
+适用范围、生效时间与原因。用户不接受升级时可停止使用；已经录制的内容
+应当仍可停止、保存和导出，不以升级、登录或付费作为取回已有录音的条件。
+此机制不授予权利人擅自扣款的权利，也不当然变更已经购买的权益。
+涉及付费、账号或已有权益的实质变化，应依法明确告知并履行相应义务。
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+三、内容权利与数据
+软件许可不包含用户录制内容的著作权、传播或商业使用许可。用户应当拥有
+相应用途所需的权利，遵守适用法律，不得利用软件侵害他人合法权益。
+录音在本地处理；联网版本验证与下载统计的数据范围见随附隐私说明。
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+四、既有许可与第三方组件
+先前按 MIT 许可发布的版本及其中已授予的权利不因本许可而被追溯撤销。
+已有 MIT 代码和第三方组件仍按其适用许可处理；本许可仅在权利人有权
+另行授权的范围内适用。Sparkle 及其依赖的许可和声明随官方应用保留。
+
+五、责任与法定权利
+在适用法律允许范围内，软件按实际提供状态交付，不保证适用于所有设备、
+平台、内容和用途。本许可不排除法律规定不可排除的责任或消费者权利。
+需要取得额外授权或反馈问题，请通过项目仓库列出的联系渠道联系权利人。

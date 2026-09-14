@@ -2,7 +2,7 @@
 
 原生 macOS 小工具：点击开始，倒计时 3 秒，只录制 Mac 正在播放的系统声音。点击停止后，导出带 Apple Lossless（ALAC）音轨的 MP4。
 
-[下载最新版](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases/latest) · [个人作品集](https://lowpower.me/#lossless-recorder)
+3.1 正在准备发布 · [发布记录](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases) · [个人作品集](https://lowpower.me/#lossless-recorder)
 
 ## 使用
 
@@ -20,7 +20,8 @@
 - 私有聚合设备仅包含音频 tap，不添加物理输入设备，也不更改系统默认播放设备。
 - MP4、ALAC、立体声，保留 tap 的采样率（常见 48 kHz），24-bit 编码提示。
 - “无损”指不会再次使用 AAC/MP3 等有损压缩。系统混音、浮点转整数及音源原有压缩不能还原，不承诺与播放器源文件逐字节一致。
-- 本地处理，无账号、遥测、网络上传、后台驻留或自动更新。
+- 音频本地处理，无账号或音频上传。**每次开始录音必须联网验证版本**；断网、验证失败或版本被停用时不能新建录音，已录内容仍可保存。关闭可选的 Sparkle 自动更新检查不关闭版本验证。详见 [隐私与下载统计](docs/privacy.md)。
+- 更新需用户确认安装；录音、导出及有未保存录音时不允许更新。安装准备期间暂不能开始新录音，检查网络期间仍可录音。详见 [自动更新接入与发布边界](docs/auto-update.md)。
 - 系统设置可能把仅音频录制归在「屏幕与系统音频录制」分类；无需开启麦克风。其他应用/验收工具录屏时仍可能出现共享指示。
 
 ## 构建
@@ -29,12 +30,17 @@
 
 ```sh
 swift test
+npm --prefix server test
+python3 scripts/test_release_configuration.py
+# 先按 docs/auto-update.md 设置全部四项正式配置
 ./scripts/build-app.sh
 # Intel / Apple Silicon 双架构
 LOSSLESS_RECORDER_UNIVERSAL=1 ./scripts/build-app.sh
 ```
 
-产物：`dist/无损系统录音机.app`。脚本使用钥匙串中可用的签名身份，也可通过 `LOSSLESS_RECORDER_SIGNING_IDENTITY` 指定。没有证书时使用本地临时签名；公开下载使用 Developer ID 签名、公证的发布包。
+隔离验收可用 `LOSSLESS_RECORDER_SCRATCH_DIR=/tmp/recorder-build LOSSLESS_RECORDER_OUTPUT_DIR=/tmp/recorder-app ./scripts/build-app.sh`，输出目录应为空，避免覆盖旧包。
+
+默认产物：`dist/无损系统录音机.app`。脚本使用钥匙串中可用的签名身份，也可通过 `LOSSLESS_RECORDER_SIGNING_IDENTITY` 指定。没有证书时使用本地临时签名；公开下载使用 Developer ID 签名、公证的发布包。
 
 ## 验收
 
@@ -55,4 +61,8 @@ swift scripts/check-audio.swift /tmp/recorder-check/*.mp4
 
 参考：[Apple — Core Audio taps](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)。
 
-MIT License。图标由 `scripts/generate-icon.swift` 原生绘制，无外部图片或第三方运行时依赖。
+3.1 起采用 [自有软件使用许可](LICENSE)，支持未来商业化；历史 MIT 授权不追溯撤销。图标由 `scripts/generate-icon.swift` 原生绘制，无外部图片；应用内更新依赖 Sparkle 2.9.6（随应用捆绑，保留其许可证）。
+
+## 发布与运营
+
+当前开发版本 3.1.0（build 5）。[五档升级策略](docs/auto-update.md) · [策略服务与下载统计](docs/server-operations.md) · [明日发布准备检查](docs/release-readiness-2026-09-15.md)。正式发布使用 `scripts/prepare-release.sh`，必须配置真实 HTTPS 服务、签名密钥和公证钥匙串配置；源码测试通过不表示已经上线。

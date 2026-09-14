@@ -17,7 +17,51 @@ final class RecorderViewModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var elapsedSeconds: TimeInterval = 0
 
-    private let recorder = SystemAudioCaptureService()
+    private let recorder: SystemAudioCaptureService
+    private let policyService: any VersionPolicyChecking
+    private let countdownPause: () async throws -> Void
+    @Published private(set) var policy: VersionPolicy?
+    @Published private(set) var policyError: String?
+    @Published private(set) var checkingPolicy = false
+    private var policyChecks = 0
+
+    init(recorder: SystemAudioCaptureService = SystemAudioCaptureService(),
+         policyService: (any VersionPolicyChecking)? = nil,
+         countdownPause: @escaping () async throws -> Void = { try await Task.sleep(nanoseconds: 1_000_000_000) }) {
+        self.recorder = recorder
+        self.policyService = policyService ?? VersionPolicyService()
+        self.countdownPause = countdownPause
+    }
+
+    func refreshPolicy() async {
+        do { _ = try await verifyPolicy(requirePermission: false) }
+        catch { /* The verification state is already displayed without disturbing active audio. */ }
+    }
+
+    @discardableResult
+    private func verifyPolicy(requirePermission: Bool = true) async throws -> VersionPolicy {
+        policyChecks += 1
+        checkingPolicy = true
+        defer { policyChecks -= 1; checkingPolicy = policyChecks > 0 }
+        do {
+            let receipt = try await policyService.check()
+            try Task.checkCancellation()
+            policy = receipt
+            policyError = nil
+            if requirePermission, receipt.blocksRecording(at: Date()) {
+                throw PolicyFailure(message: "此版本已不能开始新录音，请升级后继续。现有录音仍可保存。")
+            }
+            return receipt
+        } catch {
+            if !(error is CancellationError) { policyError = error.localizedDescription }
+            throw error
+        }
+    }
+
+    func openPolicyDownload() {
+        guard let url = policy?.downloadURL else { return }
+        NSWorkspace.shared.open(url)
+    }
     private var actionTask: Task<Void, Never>?
     private var clockTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
@@ -25,6 +69,19 @@ final class RecorderViewModel: ObservableObject {
     private var pendingSummary: RecordingSummary?
 
     private var terminating = false
+    @Published var updateInProgress = false
+
+    var canInstallUpdate: Bool {
+        Self.permitsUpdate(phase: phase, hasPendingRecording: pendingTemporaryURL != nil) && !terminating
+    }
+
+    static func permitsUpdate(phase: Phase, hasPendingRecording: Bool) -> Bool {
+        guard !hasPendingRecording else { return false }
+        switch phase {
+        case .preparing, .countingDown, .recording, .exporting: return false
+        case .idle, .finished, .failed: return true
+        }
+    }
 
     var isBusy: Bool {
         switch phase {
@@ -40,22 +97,29 @@ final class RecorderViewModel: ObservableObject {
         return false
     }
 
-    func start() {
-        guard !isBusy, !terminating else { return }
+    func start() { beginStart(discardPending: false) }
+
+    private func beginStart(discardPending: Bool) {
+        guard !isBusy, !terminating, !updateInProgress else { return }
         actionTask?.cancel()
-        cleanupPendingTemporaryFile()
+        guard pendingTemporaryURL == nil || discardPending else { return }
         elapsedSeconds = 0
         phase = .preparing
 
         actionTask = Task { [weak self] in
             guard let self else { return }
             do {
+                try await verifyPolicy()
+                try Task.checkCancellation()
+                cleanupPendingTemporaryFile()
                 try await recorder.prepare()
                 for value in stride(from: 3, through: 1, by: -1) {
                     try Task.checkCancellation()
                     phase = .countingDown(value)
-                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    try await countdownPause()
                 }
+                try Task.checkCancellation()
+                try await verifyPolicy()
                 try Task.checkCancellation()
                 try await recorder.start()
                 try Task.checkCancellation()
@@ -120,13 +184,15 @@ final class RecorderViewModel: ObservableObject {
         }
     }
 
+    var hasPendingRecording: Bool { pendingTemporaryURL != nil }
+
     func exportAgain() {
         guard pendingTemporaryURL != nil else { return }
         exportPendingRecording()
     }
 
     func recordAgain() {
-        guard !isBusy else { return }
+        guard !isBusy, !updateInProgress else { return }
 
         if pendingTemporaryURL != nil {
             let alert = NSAlert()
@@ -139,8 +205,7 @@ final class RecorderViewModel: ObservableObject {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        reset()
-        start()
+        beginStart(discardPending: true)
     }
 
     func reset() {

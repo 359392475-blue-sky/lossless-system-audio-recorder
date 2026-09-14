@@ -13,10 +13,13 @@ let package = Package(
             targets: ["LosslessSystemAudioRecorder"]
         )
     ],
+    dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6")],
     targets: [
         .executableTarget(
             name: "LosslessSystemAudioRecorder",
-            path: "Sources/LosslessSystemAudioRecorder"
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            path: "Sources/LosslessSystemAudioRecorder",
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .testTarget(
             name: "LosslessSystemAudioRecorderTests",

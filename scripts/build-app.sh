@@ -4,11 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
 APP_NAME="无损系统录音机"
-APP_BUNDLE="$PROJECT_DIR/dist/$APP_NAME.app"
+OUTPUT_DIR="${LOSSLESS_RECORDER_OUTPUT_DIR:-$PROJECT_DIR/dist}"
+SCRATCH_DIR="${LOSSLESS_RECORDER_SCRATCH_DIR:-$PROJECT_DIR/.build}"
+APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
-ICON_WORK_DIR="$PROJECT_DIR/.build/AppIcon.iconset"
+ICON_WORK_DIR="$SCRATCH_DIR/AppIcon.iconset"
 
-BUILD_ARGS=(-c release --package-path "$PROJECT_DIR")
+# Validate before compiling or touching an output bundle. There is no offline build switch.
+python3 "$SCRIPT_DIR/configure-release.py"
+
+BUILD_ARGS=(-c release --package-path "$PROJECT_DIR" --scratch-path "$SCRATCH_DIR")
 if [[ "${LOSSLESS_RECORDER_UNIVERSAL:-0}" == "1" ]]; then
   BUILD_ARGS+=(--arch arm64 --arch x86_64)
 fi
@@ -16,17 +21,27 @@ swift build "${BUILD_ARGS[@]}"
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 
 if [[ -e "$APP_BUNDLE" ]]; then
-  case "$APP_BUNDLE" in
-    "$PROJECT_DIR"/dist/*.app) rm -r "$APP_BUNDLE" ;;
-    *) print -u2 "拒绝清理非 dist 应用路径：$APP_BUNDLE"; exit 1 ;;
-  esac
+  print -u2 "输出应用已存在，拒绝覆盖：$APP_BUNDLE。请指定新的 LOSSLESS_RECORDER_OUTPUT_DIR。"
+  exit 1
 fi
 
 mkdir -p "$CONTENTS_DIR/MacOS" "$CONTENTS_DIR/Resources" "$ICON_WORK_DIR"
 cp "$BIN_DIR/LosslessSystemAudioRecorder" "$CONTENTS_DIR/MacOS/"
 cp "$PROJECT_DIR/AppBundle/Info.plist" "$CONTENTS_DIR/Info.plist"
 
-MASTER_ICON="$PROJECT_DIR/.build/AppIcon-1024.png"
+python3 "$SCRIPT_DIR/configure-release.py" --plist "$CONTENTS_DIR/Info.plist"
+cp "$PROJECT_DIR/LICENSE" "$CONTENTS_DIR/Resources/LICENSE.txt"
+cp "$PROJECT_DIR/docs/privacy.md" "$CONTENTS_DIR/Resources/Privacy.md"
+
+FRAMEWORK_SOURCE="$BIN_DIR/Sparkle.framework"
+if [[ ! -d "$FRAMEWORK_SOURCE" ]]; then
+  print -u2 "Sparkle.framework missing from build products"; exit 1
+fi
+mkdir -p "$CONTENTS_DIR/Frameworks"
+ditto "$FRAMEWORK_SOURCE" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+cp "$SCRATCH_DIR/checkouts/Sparkle/LICENSE" "$CONTENTS_DIR/Resources/Sparkle-LICENSE.txt"
+
+MASTER_ICON="$SCRATCH_DIR/AppIcon-1024.png"
 swift "$PROJECT_DIR/scripts/generate-icon.swift" "$MASTER_ICON"
 for spec in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" "128:128x128" "256:128x128@2x" "256:256x256" "512:256x256@2x" "512:512x512" "1024:512x512@2x"; do
   pixels="${spec%%:*}"
@@ -44,13 +59,21 @@ if [[ -z "$SIGNING_IDENTITY" ]]; then
   SIGNING_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development:/ { print $2; exit }')"
 fi
 
+SIGN_ARGS=(--force --sign "${SIGNING_IDENTITY:--}")
 if [[ -n "$SIGNING_IDENTITY" ]]; then
-  codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_BUNDLE"
+  SIGN_ARGS+=(--options runtime --timestamp)
   print "Signing: stable Apple code-signing identity"
 else
-  codesign --force --deep --sign - "$APP_BUNDLE"
-  print -u2 "Warning: no Apple signing identity found; screen-recording permission may need to be granted again after rebuilding."
+  print -u2 "Warning: no Apple signing identity found; local ad-hoc signature only."
 fi
+# Sign nested executables first, then their containers; do not rely on --deep signing.
+SPARKLE="$CONTENTS_DIR/Frameworks/Sparkle.framework/Versions/B"
+for nested in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" "$SPARKLE/XPCServices/Downloader.xpc" "$SPARKLE/XPCServices/Installer.xpc"; do
+  [[ -e "$nested" ]] || { print -u2 "Sparkle helper missing: $nested"; exit 1; }
+  codesign "${SIGN_ARGS[@]}" "$nested"
+done
+codesign "${SIGN_ARGS[@]}" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 plutil -lint "$CONTENTS_DIR/Info.plist"
 

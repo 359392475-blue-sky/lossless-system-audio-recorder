@@ -9,12 +9,17 @@ enum CaptureVerification {
         let directory = URL(fileURLWithPath: args[index + 1], isDirectory: true)
         Task {
             let service = SystemAudioCaptureService()
+            let policyService = VersionPolicyService()
             var result: [String: Any] = ["backend": "CoreAudioProcessTap", "cycles": []]
             var cycles: [[String: Any]] = []
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
                 for index in 1...3 {
+                    let before = try await policyService.check()
+                    guard !before.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
                     try await service.prepare()
+                    let after = try await policyService.check()
+                    guard !after.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
                     try await service.start()
                     let active = await service.diagnostics()
                     try await Task.sleep(nanoseconds: 3_000_000_000)
@@ -28,6 +33,8 @@ enum CaptureVerification {
                     cycles.append(["active": active, "stopped": stopped,
                                    "duration": summary.duration, "file": destination.lastPathComponent])
                 }
+                let finalPolicy = try await policyService.check()
+                guard !finalPolicy.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
                 try await service.prepare(); try await service.cancel(); try await service.cancel()
                 result["cancelled"] = await service.diagnostics()
                 result["status"] = "passed"
