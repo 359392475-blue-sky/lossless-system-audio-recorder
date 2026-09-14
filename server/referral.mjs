@@ -8,7 +8,9 @@ const fail=(status,code)=>{throw new Failure(status,code);};
 const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function createReferrals(env,{db,key,now,currentPolicy}) {
   const fields=['REFERRAL_PUBLIC_ORIGIN','REFERRAL_DEVICE_PEPPER','REFERRAL_SERIES','REFERRAL_ARTIFACT_FILE','REFERRAL_ARTIFACT_SHA256'];
-  if(!fields.some(k=>env[k])) return {handle:async(req,res,u)=>{if(u.pathname==='/v1/referral'||u.pathname.startsWith('/r/')){reply(res,503,{error:'referral_not_configured'});return true;}return false;},stats(){return {status:'not_configured'};},close(){}};
+  const initialized=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='referral_configuration'").get() && db.prepare('SELECT 1 FROM referral_configuration WHERE id=1').get();
+  if(initialized && fields.some(k=>!env[k])) throw new Error('Initialized referrals require complete configuration');
+  if(!fields.some(k=>env[k])) return {enabled:false,handle:async(req,res,u)=>{if(u.pathname==='/v1/referral'||u.pathname.startsWith('/r/')){reply(res,503,{error:'referral_not_configured'});return true;}return false;},stats(){return {status:'not_configured'};},close(){}};
   if(fields.some(k=>!env[k])) throw new Error('Incomplete referral configuration');
   const origin=new URL(httpsURL(env.REFERRAL_PUBLIC_ORIGIN));
   if(origin.pathname!=='/'||origin.search||Buffer.byteLength(env.REFERRAL_DEVICE_PEPPER)<32||!/^\d+\.\d+$/.test(env.REFERRAL_SERIES)||Number(env.RELEASE_ARTIFACT_BUILD)<6||!/^[a-f0-9]{64}$/.test(env.REFERRAL_ARTIFACT_SHA256)) throw new Error('Invalid referral configuration');
@@ -135,7 +137,7 @@ export function createReferrals(env,{db,key,now,currentPolicy}) {
     const bySeries=db.prepare('SELECT series,COUNT(*) registeredDeviceSeries,COALESCE(SUM(qualified_count>=2),0) unlockedDeviceSeries FROM referral_accounts GROUP BY series ORDER BY series').all();
     return {status:'available',...tickets,...devices,...accounts,bySeries,deliveryMeaning:'Server finished sending complete SHA256-matched artifact; not proof of client save or install'};
   }
-  return {handle,stats,close(){}};
+  return {enabled:true,handle,stats,close(){}};
 }
 function reply(res,status,value){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end(JSON.stringify(value));}
 function html(res,body,head=false){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end(head?undefined:`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>无损系统录音机邀请</title><body style="font:18px system-ui;max-width:680px;margin:60px auto;padding:24px;line-height:1.7">${body}</body></html>`);}

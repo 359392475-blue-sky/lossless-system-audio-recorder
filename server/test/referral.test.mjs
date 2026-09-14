@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { request } from 'node:http';
-import { generateKeyPairSync,createHash,sign,verify,randomUUID,randomBytes } from 'node:crypto';
+import { generateKeyPairSync,createPublicKey,createHash,sign,verify,randomUUID,randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createService } from '../service.mjs';
 function identity(){const keys=generateKeyPairSync('ed25519');return {...keys,publicKeyRaw:keys.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('base64'),hardware:randomBytes(32).toString('hex')};}
@@ -91,7 +91,7 @@ test('old schema migration retains counters and never stores raw identity or tic
  const row=db.prepare('SELECT * FROM referral_devices').get();assert.notEqual(row.id,who.publicKeyRaw);assert.notEqual(row.hardware,who.hardware);assert.notEqual(db.prepare('SELECT id FROM referral_tickets').get().id,ticket.ticket);db.close();
 });
 test('referral config and artifact hash fail closed, browser flow shows explicit activation',async t=>{
- const f=await fixture(t);assert.throws(()=>createService({...f.env,REFERRAL_ARTIFACT_SHA256:'0'.repeat(64)}),/digest/);assert.throws(()=>createService({...f.env,REFERRAL_DEVICE_PEPPER:''}),/Incomplete/);
+ const f=await fixture(t);assert.throws(()=>createService({...f.env,REFERRAL_ARTIFACT_SHA256:'0'.repeat(64)}),/digest/);assert.throws(()=>createService({...f.env,REFERRAL_DEVICE_PEPPER:''}),/configuration/);
  const owner=identity(),s=await f.send(owner,'status'),r=await f.get('/r/'+s.referralCode);assert.equal(r.status,200);assert.match(await r.text(),/五次成功录音/);
  const page=await f.get('/r/'+s.referralCode+'/ticket',{method:'POST'});assert.match(await page.text(),/lossless-recorder:\/\/activate\?ticket=/);
 });
@@ -111,4 +111,23 @@ test('pepper rotation and modified artifact rejected',async t=>{
  assert.throws(()=>createService({...f.env,REFERRAL_DEVICE_PEPPER:'q'.repeat(32)}),/pepper cannot be changed/);
  const file=readFileSync(f.env.REFERRAL_ARTIFACT_FILE);file[10]=42;writeFileSync(f.env.REFERRAL_ARTIFACT_FILE,file);
  assert.equal((await f.get('/r/download?ticket='+ticket.ticket)).status,503);
+});
+
+test('enabled referrals force signed upgrade for legacy build regardless of configured reminder level',async t=>{
+ const f=await fixture(t);
+ for(const build of [5,6]){
+   const nonce=randomUUID(),response=await f.get(`/v1/policy?build=${build}&nonce=${nonce}`);assert.equal(response.status,200);
+   const envelope=await response.json(),raw=Buffer.from(envelope.payload,'base64');
+   const publicKey=createPublicKey(readFileSync(f.env.POLICY_PRIVATE_KEY_FILE));
+   assert(verify(null,raw,publicKey,Buffer.from(envelope.signature,'base64')));
+   const policy=JSON.parse(raw);assert.equal(policy.clientBuild,build);assert.equal(policy.nonce,nonce);
+   assert.equal(policy.level,build<6?4:0);assert(policy.minimumBuild>=6);
+   if(build<6)assert.match(policy.message,/下载安装最新版本/);
+ }
+});
+
+test('initialized referral database cannot silently disable entitlement service',async t=>{
+ const f=await fixture(t),disabled={...f.env};
+ for(const name of Object.keys(disabled))if(name.startsWith('REFERRAL_'))delete disabled[name];
+ assert.throws(()=>createService(disabled),/Initialized referrals require complete configuration/);
 });

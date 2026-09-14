@@ -73,7 +73,11 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
       if (u.pathname === '/v1/policy') {
         const build = u.searchParams.get('build'), nonce = u.searchParams.get('nonce');
         if ([...u.searchParams.keys()].some(k => !['build','nonce'].includes(k)) || u.searchParams.getAll('build').length !== 1 || u.searchParams.getAll('nonce').length !== 1 || !/^[1-9][0-9]*$/.test(build ?? '') || !Number.isSafeInteger(Number(build)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nonce ?? '')) return json(res,400,{error:'invalid_request'},head);
-        const p = currentPolicy(), issuedAt = Math.floor(now()/1000);
+        let p = currentPolicy();
+        if (referrals.enabled && Number(build) < 6) {
+          p = {...p,level:4,minimumBuild:Math.max(6,p.minimumBuild),title:'请升级以继续使用',message:'当前版本不支持录音试用与邀请权益验证。请下载安装最新版本后继续录音；已有录音仍可保存。'};
+        }
+        const issuedAt = Math.floor(now()/1000);
         const payload = Buffer.from(JSON.stringify({...p,nonce,clientBuild:Number(build),issuedAt,expiresAt:issuedAt+60}));
         return json(res,200,{payload:payload.toString('base64'),signature:sign(null,payload,key).toString('base64')},head);
       }
