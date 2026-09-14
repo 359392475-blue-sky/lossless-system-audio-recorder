@@ -19,6 +19,8 @@ final class RecorderViewModel: ObservableObject {
 
     private let recorder: SystemAudioCaptureService
     private let policyService: any VersionPolicyChecking
+    let referrals: ReferralCoordinator
+    private var referralOperationID: String?
     private let countdownPause: () async throws -> Void
     @Published private(set) var policy: VersionPolicy?
     @Published private(set) var policyError: String?
@@ -27,7 +29,9 @@ final class RecorderViewModel: ObservableObject {
 
     init(recorder: SystemAudioCaptureService = SystemAudioCaptureService(),
          policyService: (any VersionPolicyChecking)? = nil,
+         referrals: ReferralCoordinator? = nil,
          countdownPause: @escaping () async throws -> Void = { try await Task.sleep(nanoseconds: 1_000_000_000) }) {
+        self.referrals = referrals ?? ReferralCoordinator()
         self.recorder = recorder
         self.policyService = policyService ?? VersionPolicyService()
         self.countdownPause = countdownPause
@@ -111,6 +115,8 @@ final class RecorderViewModel: ObservableObject {
             do {
                 try await verifyPolicy()
                 try Task.checkCancellation()
+                referralOperationID = try await referrals.begin()
+                try Task.checkCancellation()
                 cleanupPendingTemporaryFile()
                 try await recorder.prepare()
                 for value in stride(from: 3, through: 1, by: -1) {
@@ -121,15 +127,20 @@ final class RecorderViewModel: ObservableObject {
                 try Task.checkCancellation()
                 try await verifyPolicy()
                 try Task.checkCancellation()
+                guard let operationID = referralOperationID else { throw PolicyFailure(message: "缺少录音使用许可。") }
+                try await referrals.revalidate(operationID)
+                try Task.checkCancellation()
                 try await recorder.start()
                 try Task.checkCancellation()
                 recordingStartedAt = Date()
                 phase = .recording
                 beginClock()
             } catch is CancellationError {
+                cancelReferralOperation()
                 do { try await recorder.cancel(); phase = .idle }
                 catch { phase = .failed(error.localizedDescription) }
             } catch {
+                cancelReferralOperation()
                 let original = error
                 do { try await recorder.cancel(); phase = .failed(original.localizedDescription) }
                 catch { phase = .failed(error.localizedDescription) }
@@ -160,6 +171,7 @@ final class RecorderViewModel: ObservableObject {
         await task?.value
         try await recorder.cancel()
         actionTask = nil
+        cancelReferralOperation()
     }
 
     private func finishRecording() {
@@ -169,14 +181,20 @@ final class RecorderViewModel: ObservableObject {
                 let (temporaryURL, summary) = try await recorder.stop()
                 pendingTemporaryURL = temporaryURL
                 pendingSummary = summary
+                if let operationID = referralOperationID {
+                    referrals.complete(operationID)
+                    referralOperationID = nil
+                }
                 // A completed recording stays recoverable when closing while
                 // the MP4 is being finalized; never open a save panel on exit.
                 guard !Task.isCancelled, !terminating else { return }
                 exportPendingRecording()
             } catch is CancellationError {
+                cancelReferralOperation()
                 do { try await recorder.cancel() }
                 catch { phase = .failed(error.localizedDescription) }
             } catch {
+                cancelReferralOperation()
                 let original = error
                 do { try await recorder.cancel(); phase = .failed(original.localizedDescription) }
                 catch { phase = .failed(error.localizedDescription) }
@@ -208,7 +226,13 @@ final class RecorderViewModel: ObservableObject {
         beginStart(discardPending: true)
     }
 
+    private func cancelReferralOperation() {
+        if let operationID = referralOperationID { referrals.cancel(operationID) }
+        referralOperationID = nil
+    }
+
     func reset() {
+        cancelReferralOperation()
         actionTask?.cancel()
         clockTask?.cancel()
         cleanupPendingTemporaryFile()

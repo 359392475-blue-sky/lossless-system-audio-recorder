@@ -2,7 +2,7 @@
 
 原生 macOS 小工具：点击开始，倒计时 3 秒，只录制 Mac 正在播放的系统声音。点击停止后，导出带 Apple Lossless（ALAC）音轨的 MP4。
 
-3.1 正在准备发布 · [发布记录](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases) · [个人作品集](https://lowpower.me/#lossless-recorder)
+3.2 正在准备发布 · [发布记录](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases) · [个人作品集](https://lowpower.me/#lossless-recorder)
 
 ## 使用
 
@@ -23,6 +23,12 @@
 - 音频本地处理，无账号或音频上传。**每次开始录音必须联网验证版本**；断网、验证失败或版本被停用时不能新建录音，已录内容仍可保存。关闭可选的 Sparkle 自动更新检查不关闭版本验证。详见 [隐私与下载统计](docs/privacy.md)。
 - 更新需用户确认安装；录音、导出及有未保存录音时不允许更新。安装准备期间暂不能开始新录音，检查网络期间仍可录音。详见 [自动更新接入与发布边界](docs/auto-update.md)。
 - 系统设置可能把仅音频录制归在「屏幕与系统音频录制」分类；无需开启麦克风。其他应用/验收工具录屏时仍可能出现共享指示。
+
+## 邀请解锁（3.2）
+
+无需账号，先免费成功录音 **5 次**。复制应用内邀请链接；两位新设备用户通过链接下载、安装后点击“打开应用并激活”，再成功完成首次录音，你的 **3.2 系列**即可无限次免费使用。同系列修复版继承权益，仍需联网验证且保留最高档强制升级。取消倒计时、失败不扣次，重复导出不重复扣次。
+
+服务端下载完成与设备首次使用须同时满足，单点链接不发奖励；同一设备、自邀和重复激活不重复计数。详见 [邀请机制与验收边界](docs/referral-unlock.md)。当前是代码实现，正式活动尚未上线。
 
 ## 构建
 
@@ -65,4 +71,4 @@ swift scripts/check-audio.swift /tmp/recorder-check/*.mp4
 
 ## 发布与运营
 
-当前开发版本 3.1.0（build 5）。[五档升级策略](docs/auto-update.md) · [策略服务与下载统计](docs/server-operations.md) · [明日发布准备检查](docs/release-readiness-2026-09-15.md)。正式发布使用 `scripts/prepare-release.sh`，必须配置真实 HTTPS 服务、签名密钥和公证钥匙串配置；源码测试通过不表示已经上线。
+当前开发版本 3.2.0（build 6）。[五档升级策略](docs/auto-update.md) · [策略服务与下载统计](docs/server-operations.md) · [明日发布准备检查](docs/release-readiness-2026-09-15.md)。正式发布使用 `scripts/prepare-release.sh`，必须配置真实 HTTPS 服务、签名密钥和公证钥匙串配置；源码测试通过不表示已经上线。

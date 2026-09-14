@@ -26,8 +26,11 @@ def audit(app):
         raise ValueError("缺少强制签名验证配置")
     if info.get("CFBundleIdentifier") != "app.lowpower.lossless-system-audio-recorder":
         raise ValueError("应用身份不匹配")
-    if int(info.get("CFBundleVersion", "0")) < 5:
-        raise ValueError("拒绝发布不包含在线准入的旧版本")
+    if int(info.get("CFBundleVersion", "0")) < 6:
+        raise ValueError("拒绝发布不包含在线准入和邀请额度验证的旧版本")
+    schemes = [scheme for item in info.get("CFBundleURLTypes", []) for scheme in item.get("CFBundleURLSchemes", [])]
+    if schemes.count("lossless-recorder") != 1:
+        raise ValueError("缺少或重复配置邀请激活 URL scheme")
     executable = contents / "MacOS" / info["CFBundleExecutable"]
     binaries = {executable.resolve()}
     for candidate in (contents / "Frameworks").rglob("*"):

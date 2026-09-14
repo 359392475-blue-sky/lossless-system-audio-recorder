@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Opt-in integration check. Never runs on a normal launch, never uploads data.
+/// Opt-in integration check. Never runs on a normal launch, never uploads audio. Production version and usage verification still apply.
 enum CaptureVerification {
     @MainActor static func runIfRequested() {
         let args = ProcessInfo.processInfo.arguments
@@ -10,6 +10,8 @@ enum CaptureVerification {
         Task {
             let service = SystemAudioCaptureService()
             let policyService = VersionPolicyService()
+            let referrals = ReferralCoordinator()
+            var referralOperationID: String?
             var result: [String: Any] = ["backend": "CoreAudioProcessTap", "cycles": []]
             var cycles: [[String: Any]] = []
             do {
@@ -17,13 +19,18 @@ enum CaptureVerification {
                 for index in 1...3 {
                     let before = try await policyService.check()
                     guard !before.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
+                    referralOperationID = try await referrals.begin()
                     try await service.prepare()
                     let after = try await policyService.check()
                     guard !after.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
+                    guard let operationID = referralOperationID else { throw PolicyFailure(message: "缺少录音使用许可。") }
+                    try await referrals.revalidate(operationID)
                     try await service.start()
                     let active = await service.diagnostics()
                     try await Task.sleep(nanoseconds: 3_000_000_000)
                     let (url, summary) = try await service.stop()
+                    referrals.complete(operationID)
+                    referralOperationID = nil
                     let stopped = await service.diagnostics()
                     guard stopped["tap"] == "0", stopped["device"] == "0", stopped["io"] == "none" else {
                         throw RecorderError.invalidOutput("停止后仍有采集资源。")
@@ -33,12 +40,14 @@ enum CaptureVerification {
                     cycles.append(["active": active, "stopped": stopped,
                                    "duration": summary.duration, "file": destination.lastPathComponent])
                 }
+                await referrals.refresh()
                 let finalPolicy = try await policyService.check()
                 guard !finalPolicy.blocksRecording(at: Date()) else { throw PolicyFailure(message: "当前版本禁止录音验收，请升级。") }
                 try await service.prepare(); try await service.cancel(); try await service.cancel()
                 result["cancelled"] = await service.diagnostics()
                 result["status"] = "passed"
             } catch {
+                if let operationID = referralOperationID { referrals.cancel(operationID); await referrals.refresh() }
                 result["status"] = "failed"; result["error"] = error.localizedDescription
                 do { try await service.cancel() }
                 catch { result["cleanupError"] = error.localizedDescription }

@@ -87,7 +87,7 @@ final class VersionPolicyTests: XCTestCase {
     func testRefreshDenialDoesNotInterruptExistingRecording() async throws {
         let driver = PolicyTestDriver()
         let checker = PolicyTestChecker(denyOn: 3)
-        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, countdownPause: {})
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, referrals: recordingTestReferrals(), countdownPause: {})
         model.start()
         for _ in 0..<100 where model.phase != .recording { try await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(model.phase, .recording)
@@ -97,6 +97,35 @@ final class VersionPolicyTests: XCTestCase {
         XCTAssertTrue(driver.active)
         XCTAssertNotNil(model.policyError)
         try await model.shutdownForTermination()
+    }
+
+    func testTrialDenialDoesNotPrepareAudio() async throws {
+        let driver = PolicyTestDriver(), checker = PolicyTestChecker(denyOn: 99)
+        let referrals = RecordingReferralStub()
+        referrals.denyBegin = true
+        let coordinator = ReferralCoordinator(service: referrals, journal: MemoryReferralJournal())
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, referrals: coordinator, countdownPause: {})
+        model.start()
+        for _ in 0..<100 where model.isBusy { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(driver.prepares, 0)
+        XCTAssertEqual(driver.starts, 0)
+        XCTAssertTrue(referrals.completed.isEmpty)
+    }
+
+    func testFailedAudioFinalizationReleasesTrialReservation() async throws {
+        let driver = PolicyTestDriver(), checker = PolicyTestChecker(denyOn: 99)
+        let referrals = RecordingReferralStub(), journal = MemoryReferralJournal()
+        let coordinator = ReferralCoordinator(service: referrals, journal: journal)
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, referrals: coordinator, countdownPause: {})
+        model.start()
+        for _ in 0..<100 where model.phase != .recording { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(model.phase, .recording)
+        model.stop() // Driver supplied no audio frames: output validation fails.
+        for _ in 0..<100 where model.isBusy { try await Task.sleep(nanoseconds: 5_000_000) }
+        await coordinator.refresh()
+        XCTAssertTrue(referrals.completed.isEmpty)
+        XCTAssertEqual(referrals.cancelled.count, 1)
+        XCTAssertTrue(journal.operations.isEmpty)
     }
 
     func testAllLevelsAndDeadline() async throws {
@@ -111,7 +140,7 @@ final class VersionPolicyTests: XCTestCase {
     func testCountdownSecondDenialReleasesDeviceWithoutStartingAudio() async throws {
         let driver = PolicyTestDriver()
         let checker = PolicyTestChecker(denyOn: 2)
-        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, countdownPause: {})
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, referrals: recordingTestReferrals(), countdownPause: {})
         model.start()
         for _ in 0..<100 where model.isBusy { try await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(checker.calls, 2)
@@ -123,7 +152,7 @@ final class VersionPolicyTests: XCTestCase {
     func testFirstDenialDoesNotPrepareAndRetryChecksAgain() async throws {
         let driver = PolicyTestDriver()
         let checker = PolicyTestChecker(denyOn: 1)
-        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, countdownPause: {})
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver), policyService: checker, referrals: recordingTestReferrals(), countdownPause: {})
         model.start()
         for _ in 0..<100 where model.isBusy { try await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(driver.prepares, 0)

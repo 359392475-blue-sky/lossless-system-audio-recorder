@@ -3,6 +3,7 @@ import { createPrivateKey, sign, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { readPolicy, httpsURL } from './policy.mjs';
+import { createReferrals } from './referral.mjs';
 
 export function createService(env, { fetchImpl = fetch, now = () => Date.now() } = {}) {
   for (const k of ['POLICY_FILE','POLICY_PRIVATE_KEY_FILE','STATS_DB','ADMIN_TOKEN','RELEASE_ARTIFACT_URL','RELEASE_ARTIFACT_BUILD']) if (!env[k]) throw new Error(`Required configuration: ${k}`);
@@ -18,7 +19,7 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
   readPolicy(env.POLICY_FILE);
   const db = new DatabaseSync(env.STATS_DB);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY); INSERT OR IGNORE INTO schema_version VALUES(1); CREATE TABLE IF NOT EXISTS policy_state(id INTEGER PRIMARY KEY CHECK(id=1), sequence INTEGER NOT NULL, canonical TEXT NOT NULL); CREATE TABLE IF NOT EXISTS download_entry_requests(day TEXT NOT NULL,channel TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(day,channel));');
-  if (db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version !== 1) { db.close(); throw new Error('Unsupported database schema'); }
+  if (db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version > 2) { db.close(); throw new Error('Unsupported database schema'); }
   function currentPolicy() {
     const p = readPolicy(env.POLICY_FILE), canonical = JSON.stringify(p);
     if (p.latestBuild !== artifactBuild || p.minimumBuild > artifactBuild) throw new Error('Policy requires a different release artifact build');
@@ -32,6 +33,8 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
   try { currentPolicy(); } catch (e) { db.close(); throw e; }
+  let referrals;
+  try { referrals = createReferrals(env,{db,key,now,currentPolicy}); } catch(e) { db.close(); throw e; }
   const increment = db.prepare('INSERT INTO download_entry_requests VALUES(?,?,1) ON CONFLICT(day,channel) DO UPDATE SET count=count+1');
   const token = Buffer.from(`Bearer ${env.ADMIN_TOKEN}`);
   async function githubStats() {
@@ -63,6 +66,7 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
     try {
       const u = new URL(req.url,'http://localhost');
       const head = req.method === 'HEAD';
+      if (await referrals.handle(req,res,u)) return;
       if (!['GET','HEAD'].includes(req.method)) return json(res,405,{error:'method_not_allowed'});
       if (u.pathname === '/health') return json(res,200,{status:'alive'},head);
       if (u.pathname === '/ready') { currentPolicy(); return json(res,200,{status:'ready'},head); }
@@ -86,11 +90,11 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
         const equal = timingSafeEqual(token,supplied.length === token.length ? supplied : Buffer.alloc(token.length));
         if (!equal || supplied.length !== token.length) return json(res,401,{error:'unauthorized'},head);
         const rows = db.prepare('SELECT day,channel,count FROM download_entry_requests ORDER BY day,channel').all();
-        return json(res,200,{download_entry_requests:{timezone:'UTC',meaning:'Successful download entry redirects; not completed downloads or unique users',rows},github:head ? {status:'not_requested'} : await githubStats(),aggregation:'Do not add the two metrics'},head);
+        return json(res,200,{download_entry_requests:{timezone:'UTC',meaning:'Successful download entry redirects; not completed downloads or unique users',rows},referrals:referrals.stats(),github:head ? {status:'not_requested'} : await githubStats(),aggregation:'Do not add the two metrics'},head);
       }
       return json(res,404,{error:'not_found'},head);
     } catch { if (!res.headersSent) json(res,503,{error:'service_unavailable'}); else res.end(); }
   });
-  server.on('close',()=>db.close());
+  server.on('close',()=>{referrals.close();db.close();});
   return server;
 }

@@ -18,6 +18,7 @@ struct ContentView: View {
                 statusCard
                 controls
                 policyNotice
+                ReferralPanel(coordinator: model.referrals)
                 footer
             }
             .padding(28)
@@ -277,5 +278,68 @@ struct ContentView: View {
 
     private func formatSize(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+
+private struct ReferralPanel: View {
+    @ObservedObject var coordinator: ReferralCoordinator
+    @State private var activationTicket = ""
+    @State private var showActivation = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let status = coordinator.status {
+                HStack {
+                    Image(systemName: status.unlocked ? "gift.fill" : "person.2.fill")
+                    Text(status.unlocked ? "\(status.series) 系列已解锁无限免费" : "邀请 2 位好友，解锁当前系列无限免费")
+                        .font(.subheadline.bold())
+                }
+                if status.unlocked {
+                    Text("同系列修复版继承免费权益；仍需联网验证版本。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("有效邀请 \(min(status.qualifiedCount, status.requiredCount))/\(status.requiredCount) · 剩余试用 \(max(0, status.freeLimit - status.usedTrials - status.reservedTrials)) 次")
+                        .font(.caption)
+                    Text("好友通过链接下载、激活并完成首次录音才计入。取消或失败不扣次。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("复制邀请链接", action: coordinator.copyShareLink)
+                    Button("刷新进度") { Task { await coordinator.refresh() } }
+                        .disabled(coordinator.checking)
+                    Spacer()
+                    Button("激活邀请") { showActivation.toggle() }
+                }
+            } else {
+                HStack {
+                    Text("免登录试用 5 次，邀请 2 位好友解锁无限免费").font(.caption)
+                    Spacer()
+                    Button("重试") { Task { await coordinator.refresh() } }
+                        .disabled(coordinator.checking)
+                }
+                Button("已有邀请激活码") { showActivation.toggle() }
+            }
+            if showActivation {
+                HStack {
+                    TextField("粘贴邀请页面上的激活码", text: $activationTicket)
+                        .textFieldStyle(.roundedBorder)
+                    Button("关联") {
+                        Task { await coordinator.claim(activationTicket.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                    }.disabled(coordinator.checking || activationTicket.isEmpty)
+                }
+            }
+            if coordinator.checking { ProgressView().controlSize(.small) }
+            if let message = coordinator.message {
+                Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+        .task { await coordinator.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await coordinator.refresh() }
+        }
     }
 }
