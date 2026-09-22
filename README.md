@@ -38,6 +38,7 @@
 swift test
 npm --prefix server test
 python3 scripts/test_release_configuration.py
+python3 scripts/test_build_path_mapping.py
 # 先按 docs/auto-update.md 设置全部四项正式配置
 ./scripts/build-app.sh
 # Intel / Apple Silicon 双架构
@@ -45,6 +46,8 @@ LOSSLESS_RECORDER_UNIVERSAL=1 ./scripts/build-app.sh
 ```
 
 隔离验收可用 `LOSSLESS_RECORDER_SCRATCH_DIR=/tmp/recorder-build LOSSLESS_RECORDER_OUTPUT_DIR=/tmp/recorder-app ./scripts/build-app.sh`，输出目录应为空，避免覆盖旧包。
+
+构建脚本会把 Swift 调试信息中的本机源码／构建路径映射为稳定的 `/source/LosslessSystemAudioRecorder`、`/build/LosslessSystemAudioRecorder` 前缀，并启用 `ConciseMagicFile`，让运行时默认的 `#file` 只包含模块和文件名。显式 `#filePath` 保留原语义，因此产品源码应避免把它带入发布包。不改动已签名的旧安装包。
 
 默认产物：`dist/无损系统录音机.app`。脚本使用钥匙串中可用的签名身份，也可通过 `LOSSLESS_RECORDER_SIGNING_IDENTITY` 指定。没有证书时使用本地临时签名；公开下载使用 Developer ID 签名、公证的发布包。
 

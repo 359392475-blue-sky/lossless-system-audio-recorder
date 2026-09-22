@@ -13,7 +13,15 @@ ICON_WORK_DIR="$SCRATCH_DIR/AppIcon.iconset"
 # Validate before compiling or touching an output bundle. There is no offline build switch.
 python3 "$SCRIPT_DIR/configure-release.py"
 
-BUILD_ARGS=(-c release --package-path "$PROJECT_DIR" --scratch-path "$SCRATCH_DIR")
+# Keep build-machine paths out of Swift runtime diagnostics and debug metadata.
+# Resolve the scratch path so the mapping also covers caller-selected build directories.
+SCRATCH_DIR="${SCRATCH_DIR:A}"
+BUILD_ARGS=(-c release --package-path "$PROJECT_DIR" --scratch-path "$SCRATCH_DIR"
+            -Xswiftc -enable-upcoming-feature -Xswiftc ConciseMagicFile)
+for mapping in "$PROJECT_DIR=/source/LosslessSystemAudioRecorder" "$SCRATCH_DIR=/build/LosslessSystemAudioRecorder"; do
+  BUILD_ARGS+=(-Xswiftc -file-prefix-map -Xswiftc "$mapping"
+              -Xswiftc -debug-prefix-map -Xswiftc "$mapping")
+done
 if [[ "${LOSSLESS_RECORDER_UNIVERSAL:-0}" == "1" ]]; then
   BUILD_ARGS+=(--arch arm64 --arch x86_64)
 fi
