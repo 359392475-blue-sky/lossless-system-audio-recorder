@@ -1,0 +1,46 @@
+[Unit]
+Description=Lossless Recorder policy and referral service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=recorder
+Group=recorder
+WorkingDirectory=/opt/recorder
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+EnvironmentFile=/etc/recorder/service.env
+ExecStartPre=/usr/bin/node /opt/recorder/server/ops.mjs check
+ExecStart=/usr/bin/node /opt/recorder/server/main.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+StateDirectory=recorder
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/recorder
+ReadOnlyPaths=/var/lib/recorder/private /var/lib/recorder/artifacts
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+TasksMax=128
+LimitNOFILE=1024
+MemoryMax=512M
+TimeoutStopSec=320
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

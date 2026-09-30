@@ -17,7 +17,7 @@ private final class FakeDriver: AudioCaptureDriver, @unchecked Sendable {
         var samples = (0..<960).map { Float(sin(Double($0) * 0.1)) * 0.2 }
         samples.withUnsafeMutableBytes { bytes in
             var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
-                mNumberChannels: 2, mDataByteSize: UInt32(bytes.count), mData: bytes.baseAddress))
+                mNumberChannels: format.mChannelsPerFrame, mDataByteSize: UInt32(bytes.count), mData: bytes.baseAddress))
             withUnsafePointer(to: &list) { receive($0) }
         }
     }
@@ -55,6 +55,25 @@ final class CaptureLifecycleTests: XCTestCase {
         XCTAssertEqual(state["active"], "false")
         XCTAssertGreaterThan(summary.duration, 0)
         XCTAssertGreaterThan(summary.fileSize, 0)
+        XCTAssertEqual(summary.sampleRate, 48_000)
+        XCTAssertEqual(summary.channelCount, 2)
+    }
+
+    func testActualMono44100FormatIsReported() async throws {
+        let driver = FakeDriver()
+        driver.format.mSampleRate = 44_100
+        driver.format.mChannelsPerFrame = 1
+        driver.format.mBytesPerFrame = 4
+        driver.format.mBytesPerPacket = 4
+        let service = SystemAudioCaptureService(driver: driver)
+        try await service.prepare(); try await service.start()
+        let (url, summary) = try await service.stop()
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertEqual(summary.sampleRate, 44_100)
+        XCTAssertEqual(summary.channelCount, 1)
+        XCTAssertTrue(summary.formatDescription.contains("1 声道"))
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
     func testTeardownFailureIsReportedAndCanBeRetried() async throws {
@@ -67,4 +86,56 @@ final class CaptureLifecycleTests: XCTestCase {
         let state = await service.diagnostics()
         XCTAssertEqual(state["active"], "false")
     }
+    @MainActor
+    func testMultipleCompletedRecordingsAreRecoveredWithoutDeletion() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        for index in 1...2 {
+            let service = SystemAudioCaptureService(driver: FakeDriver())
+            try await service.prepare(); try await service.start()
+            let (url, _) = try await service.stop()
+            try fm.moveItem(at: url, to: directory.appendingPathComponent("recording-\(index).mp4"))
+        }
+        let invalid = directory.appendingPathComponent("recording-incomplete.mp4")
+        try Data("incomplete".utf8).write(to: invalid)
+        let model = RecorderViewModel()
+        await model.recoverRecordings(in: directory)
+        XCTAssertTrue(model.hasPendingRecording)
+        XCTAssertEqual(model.recoveryCount, 2)
+        let secondInstance = RecorderViewModel()
+        await secondInstance.recoverRecordings(in: directory)
+        XCTAssertEqual(secondInstance.recoveryCount, 0)
+        XCTAssertFalse(model.canInstallUpdate)
+        model.reset()
+        XCTAssertTrue(model.hasPendingRecording)
+        try await model.shutdownForTermination()
+        XCTAssertEqual(try fm.contentsOfDirectory(atPath: directory.path).count, 3)
+    }
+
+    @MainActor
+    func testLegacyCompletedAudioMigratesAndIncompleteAudioIsUntouched() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let legacy = root.appendingPathComponent("old"), destination = root.appendingPathComponent("new")
+        try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let service = SystemAudioCaptureService(driver: FakeDriver())
+        try await service.prepare(); try await service.start()
+        let (url, _) = try await service.stop()
+        let oldURL = legacy.appendingPathComponent("recording-old.mp4")
+        try fm.moveItem(at: url, to: oldURL)
+        let broken = legacy.appendingPathComponent("recording-broken.mp4")
+        try Data("unfinished".utf8).write(to: broken)
+        let model = RecorderViewModel()
+        await model.recoverRecordings(in: destination, legacyDirectory: legacy)
+        XCTAssertEqual(model.recoveryCount, 1)
+        guard case let .finished(recovered, _) = model.phase else { return XCTFail("Expected recovered audio") }
+        XCTAssertEqual(recovered.deletingLastPathComponent().path, destination.path)
+        XCTAssertTrue(fm.fileExists(atPath: recovered.path))
+        XCTAssertFalse(fm.fileExists(atPath: oldURL.path))
+        XCTAssertEqual(try Data(contentsOf: broken), Data("unfinished".utf8))
+    }
+
 }

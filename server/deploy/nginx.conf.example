@@ -1,0 +1,43 @@
+# Include inside nginx's http {}. Replace example.invalid and certificate paths.
+# Do not enable a parent access/error log for these server blocks.
+server {
+    listen 80;
+    server_name recorder.example.invalid;
+    access_log off;
+    error_log /dev/null crit;
+    return 308 https://recorder.example.invalid$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name recorder.example.invalid;
+    ssl_certificate /etc/letsencrypt/live/recorder.example.invalid/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/recorder.example.invalid/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    access_log off;
+    error_log /dev/null crit;
+    server_tokens off;
+    client_max_body_size 20k;
+    client_body_timeout 15s;
+    client_header_timeout 10s;
+    send_timeout 300s;
+    keepalive_timeout 10s;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Referrer-Policy "no-referrer" always;
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header X-Real-IP "";
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_cache off;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_ignore_client_abort off;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 300s;
+        proxy_next_upstream off;
+    }
+}

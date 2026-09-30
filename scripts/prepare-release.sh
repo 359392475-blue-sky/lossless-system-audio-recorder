@@ -17,10 +17,19 @@ export LOSSLESS_RECORDER_SIGNING_IDENTITY="$IDENTITY"
 export LOSSLESS_RECORDER_UNIVERSAL=1
 "$SCRIPT_DIR/build-app.sh"
 APP="$LOSSLESS_RECORDER_OUTPUT_DIR/无损系统录音机.app"
-codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'Authority=Developer ID Application:'
+SIGN_DETAILS="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+[[ "$SIGN_DETAILS" == *'Authority=Developer ID Application:'* ]] || { print -u2 '正式包签名身份不匹配'; exit 1; }
 SUBMISSION="$LOSSLESS_RECORDER_OUTPUT_DIR/notary-submission.zip"
 ditto -c -k --keepParent "$APP" "$SUBMISSION"
-xcrun notarytool submit "$SUBMISSION" --keychain-profile "$LOSSLESS_RECORDER_NOTARY_PROFILE" --wait
+NOTARY_RESULT="$LOSSLESS_RECORDER_OUTPUT_DIR/notary-result.json"
+xcrun notarytool submit "$SUBMISSION" --keychain-profile "$LOSSLESS_RECORDER_NOTARY_PROFILE" --wait --output-format json > "$NOTARY_RESULT"
+python3 - "$NOTARY_RESULT" <<'PY_CHECK'
+import json,sys
+result=json.load(open(sys.argv[1]))
+if result.get('status') != 'Accepted':
+    raise SystemExit('公证尚未通过；保留提交结果，不生成正式制品。')
+print('Apple 公证通过：'+result['id'])
+PY_CHECK
 xcrun stapler staple "$APP"
 python3 "$SCRIPT_DIR/audit-release.py" "$APP"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
@@ -28,5 +37,6 @@ BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.
 ARCHIVE="$LOSSLESS_RECORDER_OUTPUT_DIR/LosslessSystemAudioRecorder-$VERSION-$BUILD-universal.zip"
 ditto -c -k --keepParent "$APP" "$ARCHIVE"
 shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+python3 "$SCRIPT_DIR/release-manifest.py" "$APP" "$ARCHIVE" "$NOTARY_RESULT" "$LOSSLESS_RECORDER_OUTPUT_DIR/release-manifest.json"
 rm "$SUBMISSION"
 print "已准备签名公证包：$ARCHIVE。尚未上传或发布；下一步生成签名 appcast 并完成线上验收。"

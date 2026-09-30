@@ -2,7 +2,7 @@
 
 原生 macOS 小工具：点击开始，倒计时 3 秒，只录制 Mac 正在播放的系统声音。点击停止后，导出带 Apple Lossless（ALAC）音轨的 MP4。
 
-3.2 正在准备发布 · [发布记录](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases) · [个人作品集](https://lowpower.me/#lossless-recorder)
+3.2.2 正在准备发布 · [发布记录](https://github.com/359392475-blue-sky/lossless-system-audio-recorder/releases) · [个人作品集](https://lowpower.me/#lossless-recorder)
 
 ## 使用
 
@@ -11,14 +11,14 @@
 3. 倒计时 3 秒后开始录制。点「停止并导出」选择 MP4 保存位置。
 4. 点「再次录制」开始下一段。取消保存面板后可用「再次导出」保存临时录音。
 
-关闭最后一个窗口或按 ⌘Q，会先停止录音、销毁设备再退出。录制中直接关闭会放弃当前未导出的片段；需要保留时请先点「停止并导出」。保存面板出现之前，采集已经停止。
+关闭最后一个窗口或按 ⌘Q，会先停止录音、封装并保留已完成音频、销毁设备再退出。重新打开应用可逐段找回未导出的录音；取消保存或导出失败后仍可再次导出。保存面板出现之前，采集已经停止。强制结束进程或写入失败时，尚未完成封装的音频不保证可恢复。
 
 ## 格式与隐私
 
 - macOS **14.2+**；发布包为 Apple Silicon / Intel 通用版。本机实测为 Apple Silicon，Intel 未做硬件验收。
 - Apple Core Audio process tap（进程音频采集）；没有屏幕采集会话、麦克风输入或第三方音频驱动。
 - 私有聚合设备仅包含音频 tap，不添加物理输入设备，也不更改系统默认播放设备。
-- MP4、ALAC、立体声，保留 tap 的采样率（常见 48 kHz），24-bit 编码提示。
+- MP4、ALAC，保留 tap 的采样率与声道数；完成后显示从文件读取的采样率、声道、时长和大小。24-bit 是编码提示，不当作最终位深验证。
 - “无损”指不会再次使用 AAC/MP3 等有损压缩。系统混音、浮点转整数及音源原有压缩不能还原，不承诺与播放器源文件逐字节一致。
 - 音频本地处理，无账号或音频上传。**每次开始录音必须联网验证版本**；断网、验证失败或版本被停用时不能新建录音，已录内容仍可保存。关闭可选的 Sparkle 自动更新检查不关闭版本验证。详见 [隐私与下载统计](docs/privacy.md)。
 - 更新需用户确认安装；录音、导出及有未保存录音时不允许更新。安装准备期间暂不能开始新录音，检查网络期间仍可录音。详见 [自动更新接入与发布边界](docs/auto-update.md)。
@@ -70,8 +70,16 @@ swift scripts/check-audio.swift /tmp/recorder-check/*.mp4
 
 参考：[Apple — Core Audio taps](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)。
 
-3.1 起采用 [自有软件使用许可](LICENSE)，支持未来商业化；历史 MIT 授权不追溯撤销。图标由 `scripts/generate-icon.swift` 原生绘制，无外部图片；应用内更新依赖 Sparkle 2.9.6（随应用捆绑，保留其许可证）。
+当前源码采用 [MIT 开源许可证](LICENSE)，允许使用、修改和再分发。官方服务的联网验证、试用及邀请规则属于服务运行规则，不限制 MIT 授予的源码权利。图标由 `scripts/generate-icon.swift` 原生绘制，无外部图片；应用内更新依赖 Sparkle 2.9.6（随应用捆绑，保留其许可证）。
 
 ## 发布与运营
 
-当前开发版本 3.2.0（build 6）。[五档升级策略](docs/auto-update.md) · [策略服务与下载统计](docs/server-operations.md) · [明日发布准备检查](docs/release-readiness-2026-09-15.md)。正式发布使用 `scripts/prepare-release.sh`，必须配置真实 HTTPS 服务、签名密钥和公证钥匙串配置；源码测试通过不表示已经上线。
+当前候选版本 3.2.2（build 8）已签名公证，更新清单及安装包签名验证通过，尚未公开发布。[五档升级策略](docs/auto-update.md) · [策略服务与下载统计](docs/server-operations.md) · [明日发布准备检查](docs/release-readiness-2026-09-15.md)。正式发布使用 `scripts/prepare-release.sh`，必须配置真实 HTTPS 服务、签名密钥和公证钥匙串配置；源码测试通过不表示已经上线。
+
+## 开源与自行部署
+
+2026-10-01 起，当前仓库源码按 MIT 许可开放。第三方组件（包括 Sparkle）保留各自许可。历史文档中的自有许可描述只记录当时状态，当前源码以根目录 LICENSE 为准。
+
+仓库同时包含 macOS 客户端和 Node 服务。自行构建时需部署自己的版本/邀请服务，并按 [服务运维说明](docs/server-operations.md) 与 [打包配置](docs/auto-update.md) 配置自己的 HTTPS 地址和公钥；仓库不提供生产私钥、设备数据或管理凭据。开源不意味着官方在线服务已完成上线。
+
+已有 3.2.2 候选安装包生成于本次开源之前，其中捆绑的许可未重新打包；本次仅发布源码，不新增二进制 Release。

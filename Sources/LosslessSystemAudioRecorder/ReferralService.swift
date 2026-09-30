@@ -24,11 +24,16 @@ struct ReferralStatus: Codable, Equatable {
 
 @MainActor
 protocol ReferralChecking {
+    var supportReference: String? { get }
     func status() async throws -> ReferralStatus
     func claim(ticket: String) async throws -> ReferralStatus
     func begin(operationID: String) async throws -> ReferralStatus
     func complete(operationID: String) async throws -> ReferralStatus
     func cancel(operationID: String) async throws -> ReferralStatus
+}
+
+extension ReferralChecking {
+    var supportReference: String? { nil }
 }
 
 struct ReferralConfiguration {
@@ -56,6 +61,7 @@ struct ReferralConfiguration {
 final class ReferralService: ReferralChecking {
     typealias Transport = (URLRequest) async throws -> (Data, URLResponse)
     private struct Envelope: Codable { let payload: String; let signature: String }
+    private(set) var supportReference: String?
     private let configuration: ReferralConfiguration?
     private let identityProvider: any DeviceIdentityProviding
     private let transport: Transport
@@ -131,6 +137,7 @@ final class ReferralService: ReferralChecking {
         guard let configuration else { throw PolicyFailure(message: "此版本缺少在线试用验证配置，请安装正式版本。") }
         if let operationID, UUID(uuidString: operationID) == nil { throw PolicyFailure(message: "录音操作标识无效，请重试。") }
         let identity = try identityProvider.identity()
+        supportReference = identity.publicKey
         guard identity.deviceHash.utf8.count == 64, identity.deviceHash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw PolicyFailure(message: "本机设备标识无效。") }
         let nonce = UUID().uuidString
         var object: [String: Any] = ["schema": 1, "product": "lossless-system-audio-recorder", "action": action, "publicKey": identity.publicKey, "deviceHash": identity.deviceHash, "series": configuration.series, "build": configuration.build, "nonce": nonce, "issuedAt": Int(clock().timeIntervalSince1970)]

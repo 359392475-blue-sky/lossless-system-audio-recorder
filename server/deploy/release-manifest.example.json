@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "product": "lossless-system-audio-recorder",
+  "version": "3.2.0",
+  "build": 6,
+  "sha256": "REPLACE_WITH_REAL_SHA256",
+  "bytes": 0,
+  "bundleID": "app.lowpower.lossless-system-audio-recorder",
+  "policyPublicKey": "REPLACE_WITH_REAL_RAW32_BASE64_POLICY_KEY",
+  "signingTeamID": "REPLACE_WITH_REAL_TEAM",
+  "notarizationID": "REPLACE_WITH_REAL_ACCEPTED_SUBMISSION_UUID"
+}

@@ -71,6 +71,7 @@ final class RecorderViewModel: ObservableObject {
     private var recordingStartedAt: Date?
     private var pendingTemporaryURL: URL?
     private var pendingSummary: RecordingSummary?
+    private var activeSavePanel: NSSavePanel?
 
     private var terminating = false
     @Published var updateInProgress = false
@@ -163,15 +164,88 @@ final class RecorderViewModel: ObservableObject {
 
     func shutdownForTermination() async throws {
         terminating = true
-        let task = actionTask
-        task?.cancel()
+        activeSavePanel?.cancel(nil)
         clockTask?.cancel()
         clockTask = nil
-        try await recorder.cancel()
-        await task?.value
-        try await recorder.cancel()
-        actionTask = nil
-        cancelReferralOperation()
+        let wasFinishing = phase == .recording || phase == .exporting
+        do {
+            if case .recording = phase {
+                phase = .exporting
+                finishRecording()
+                await actionTask?.value
+            } else if case .exporting = phase {
+                await actionTask?.value
+            } else {
+                actionTask?.cancel()
+                await actionTask?.value
+            }
+            try await recorder.cancel()
+            actionTask = nil
+            cancelReferralOperation()
+            if wasFinishing, case .failed(let message) = phase, pendingTemporaryURL == nil {
+                throw RecorderError.invalidOutput(message)
+            }
+        } catch {
+            terminating = false
+            throw error
+        }
+    }
+
+    private var recoveredRecordings: [(URL, RecordingSummary)] = []
+    private var recoveryLocks: [URL: FileHandle] = [:]
+    private var didRecover = false
+    @Published private(set) var recoveryCount = 0
+
+    func recoverRecordings(in directoryOverride: URL? = nil, legacyDirectory: URL? = nil) async {
+        guard !didRecover, !isBusy else { return }
+        didRecover = true
+        guard let directory = directoryOverride ?? (try? RecordingFile.recoveryDirectory()) else { return }
+        let fm = FileManager.default
+        let oldDirectory = legacyDirectory ?? (directoryOverride == nil
+            ? fm.temporaryDirectory.appendingPathComponent("LosslessSystemAudioRecorder", isDirectory: true) : nil)
+        phase = .preparing
+        // Validate before migrating: incomplete MP4 files are left untouched.
+        // Renaming keeps a legacy completed recording in exactly one location.
+        let directories = [directory] + (oldDirectory.map { [$0] } ?? [])
+        for candidateDirectory in directories {
+            guard let urls = try? fm.contentsOfDirectory(at: candidateDirectory,
+                    includingPropertiesForKeys: nil) else { continue }
+            for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                where url.pathExtension == "mp4" && url.lastPathComponent.hasPrefix("recording-")
+                    && !RecordingFile.belongsToRunningProcess(url) {
+                guard let fileLock = RecordingFile.acquireRecoveryLock(url),
+                      let summary = try? await RecordingFile.validate(url) else { continue }
+                var recoveredURL = url
+                if candidateDirectory != directory {
+                    do {
+                        try fm.createDirectory(at: directory, withIntermediateDirectories: true,
+                                               attributes: [.posixPermissions: 0o700])
+                        let destination = directory.appendingPathComponent("recording-recovered-\(UUID().uuidString).mp4")
+                        try fm.moveItem(at: url, to: destination)
+                        recoveredURL = destination
+                        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+                    } catch {
+                        // Even a migration failure must not hide usable audio.
+                        recoveredURL = url
+                    }
+                }
+                recoveryLocks[recoveredURL] = fileLock
+                recoveredRecordings.append((recoveredURL, summary))
+            }
+        }
+        recoveryCount = recoveredRecordings.count
+        phase = .idle
+        showNextRecovery()
+    }
+
+    private func showNextRecovery() {
+        guard pendingTemporaryURL == nil, !isBusy, !terminating,
+              !recoveredRecordings.isEmpty else { return }
+        let (url, summary) = recoveredRecordings.removeFirst()
+        pendingTemporaryURL = url
+        pendingSummary = summary
+        phase = .finished(url, summary)
+        recoveryCount = recoveredRecordings.count + 1
     }
 
     private func finishRecording() {
@@ -181,6 +255,7 @@ final class RecorderViewModel: ObservableObject {
                 let (temporaryURL, summary) = try await recorder.stop()
                 pendingTemporaryURL = temporaryURL
                 pendingSummary = summary
+                phase = .finished(temporaryURL, summary)
                 if let operationID = referralOperationID {
                     referrals.complete(operationID)
                     referralOperationID = nil
@@ -216,13 +291,18 @@ final class RecorderViewModel: ObservableObject {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "这段录音还没有导出"
-            alert.informativeText = "再次录制会删除当前临时录音。请先点“再次导出”保存，或者确认放弃后继续。"
+            alert.informativeText = "再次录制会删除当前保留的录音。请先点“再次导出”保存，或者确认放弃后继续。"
             alert.addButton(withTitle: "放弃并再次录制")
             alert.addButton(withTitle: "取消")
             alert.buttons.first?.hasDestructiveAction = true
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
+        if !recoveredRecordings.isEmpty {
+            cleanupPendingTemporaryFile()
+            showNextRecovery()
+            return
+        }
         beginStart(discardPending: true)
     }
 
@@ -232,6 +312,7 @@ final class RecorderViewModel: ObservableObject {
     }
 
     func reset() {
+        guard !hasPendingRecording else { return }
         cancelReferralOperation()
         actionTask?.cancel()
         clockTask?.cancel()
@@ -276,6 +357,7 @@ final class RecorderViewModel: ObservableObject {
     }
 
     private func exportPendingRecording() {
+        guard !terminating else { return }
         guard let temporaryURL = pendingTemporaryURL,
               let summary = pendingSummary else {
             phase = .failed("找不到刚刚完成的录音。")
@@ -290,20 +372,22 @@ final class RecorderViewModel: ObservableObject {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
 
+        activeSavePanel = panel
+        defer { activeSavePanel = nil }
         guard panel.runModal() == .OK, let destinationURL = panel.url else {
             phase = .finished(temporaryURL, summary)
             return
         }
 
         do {
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
-            }
-            try FileManager.default.copyItem(at: temporaryURL, to: destinationURL)
+            try RecordingFile.export(temporaryURL, to: destinationURL)
             try? FileManager.default.removeItem(at: temporaryURL)
+            try? recoveryLocks.removeValue(forKey: temporaryURL)?.close()
             pendingTemporaryURL = nil
             pendingSummary = nil
             phase = .finished(destinationURL, summary)
+            recoveryCount = recoveredRecordings.count
+            showNextRecovery()
         } catch {
             phase = .failed("导出失败：\(error.localizedDescription)")
         }
@@ -311,8 +395,10 @@ final class RecorderViewModel: ObservableObject {
 
     private func cleanupPendingTemporaryFile() {
         if let pendingTemporaryURL,
-           pendingTemporaryURL.path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+           (pendingTemporaryURL.deletingLastPathComponent() == (try? RecordingFile.recoveryDirectory()) ||
+            pendingTemporaryURL.path.hasPrefix(FileManager.default.temporaryDirectory.path)) {
             try? FileManager.default.removeItem(at: pendingTemporaryURL)
+            try? recoveryLocks.removeValue(forKey: pendingTemporaryURL)?.close()
         }
         pendingTemporaryURL = nil
         pendingSummary = nil

@@ -96,6 +96,9 @@ final class VersionPolicyTests: XCTestCase {
         XCTAssertEqual(model.phase, .recording)
         XCTAssertTrue(driver.active)
         XCTAssertNotNil(model.policyError)
+        do { try await model.shutdownForTermination(); XCTFail("No audio must report finalization failure") }
+        catch { }
+        XCTAssertTrue(model.canInstallUpdate, "Failed termination must release terminating state")
         try await model.shutdownForTermination()
     }
 
@@ -126,6 +129,27 @@ final class VersionPolicyTests: XCTestCase {
         XCTAssertTrue(referrals.completed.isEmpty)
         XCTAssertEqual(referrals.cancelled.count, 1)
         XCTAssertTrue(journal.operations.isEmpty)
+    }
+
+    func testOrdinaryQuitFinalizesAndSettlesRecordingWithoutSavePanel() async throws {
+        let driver = PolicyTestDriver(); driver.suppliesAudio = true
+        let service = RecordingReferralStub()
+        let coordinator = ReferralCoordinator(service: service, journal: MemoryReferralJournal())
+        let model = RecorderViewModel(recorder: SystemAudioCaptureService(driver: driver),
+            policyService: PolicyTestChecker(denyOn: 99), referrals: coordinator, countdownPause: {})
+        model.start()
+        for _ in 0..<100 where model.phase != .recording { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(model.phase, .recording)
+        try await model.shutdownForTermination()
+        XCTAssertFalse(driver.active)
+        XCTAssertTrue(model.hasPendingRecording)
+        guard case let .finished(url, summary) = model.phase else { return XCTFail("Completed recording must remain visible") }
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertGreaterThan(summary.duration, 0)
+        await coordinator.refresh()
+        XCTAssertEqual(service.completed.count, 1)
+        XCTAssertTrue(service.cancelled.isEmpty)
     }
 
     func testAllLevelsAndDeadline() async throws {
@@ -161,6 +185,9 @@ final class VersionPolicyTests: XCTestCase {
         for _ in 0..<100 where model.phase != .recording { try await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(checker.calls, 3)
         XCTAssertEqual(driver.starts, 1)
+        do { try await model.shutdownForTermination(); XCTFail("No audio must report finalization failure") }
+        catch { }
+        XCTAssertTrue(model.canInstallUpdate, "Failed termination must release terminating state")
         try await model.shutdownForTermination()
     }
 }
@@ -180,10 +207,20 @@ private final class PolicyTestChecker: VersionPolicyChecking {
 private final class PolicyTestDriver: AudioCaptureDriver, @unchecked Sendable {
     var format = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked, mBytesPerPacket: 8, mFramesPerPacket: 1, mBytesPerFrame: 8, mChannelsPerFrame: 2, mBitsPerChannel: 32, mReserved: 0)
     var active = false
+    var suppliesAudio = false
     var starts = 0
     var prepares = 0
     var diagnostics: [String: String] { ["active": String(active)] }
     func prepare() throws { active = true; prepares += 1 }
-    func start(receive: @escaping @Sendable (UnsafePointer<AudioBufferList>) -> Void) throws { starts += 1 }
+    func start(receive: @escaping @Sendable (UnsafePointer<AudioBufferList>) -> Void) throws {
+        starts += 1
+        guard suppliesAudio else { return }
+        var samples = [Float](repeating: 0.1, count: 960)
+        samples.withUnsafeMutableBytes { bytes in
+            var list = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+                mNumberChannels: 2, mDataByteSize: UInt32(bytes.count), mData: bytes.baseAddress))
+            withUnsafePointer(to: &list) { receive($0) }
+        }
+    }
     func stop() throws { active = false }
 }

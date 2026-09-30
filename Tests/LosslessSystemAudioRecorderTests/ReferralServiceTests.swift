@@ -102,6 +102,24 @@ final class ReferralServiceTests: XCTestCase {
         }
     }
 
+    func testSupportReferenceSurvivesIdentityConflictWithoutExposingHardwareOrTicket() async throws {
+        let service = ReferralService(info: info, identityProvider: identity, transport: { request in
+            (try JSONSerialization.data(withJSONObject: ["error": "device_identity_mismatch"]), self.http(request, status: 409))
+        })
+        XCTAssertNil(service.supportReference)
+        let ticket = String(repeating: "z", count: 43)
+        do { _ = try await service.claim(ticket: ticket); XCTFail("Conflict accepted") }
+        catch {
+            XCTAssertEqual(service.supportReference, identity.value.publicKey)
+            XCTAssertFalse(error.localizedDescription.contains(identity.value.deviceHash))
+            XCTAssertFalse(error.localizedDescription.contains(ticket))
+        }
+        let missing = ReferralService(info: [:], identityProvider: FailingReferralIdentity())
+        XCTAssertNil(missing.supportReference)
+        do { _ = try await missing.status(); XCTFail("Missing config accepted") } catch { }
+        XCTAssertNil(missing.supportReference)
+    }
+
     func testStrictTicketAndConfigurationParsing() {
         let ticket = String(repeating: "a", count: 43)
         XCTAssertEqual(ReferralService.ticket(from: URL(string: "lossless-recorder://activate?ticket=\(ticket)")!), ticket)

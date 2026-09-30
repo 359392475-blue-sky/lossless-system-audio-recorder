@@ -1,0 +1,16 @@
+[Unit]
+Description=Recorder health maintenance
+[Service]
+Type=oneshot
+User=recorder
+Group=recorder
+EnvironmentFile=/etc/recorder/service.env
+Environment=BACKUP_DIR=/var/lib/recorder/backups
+ExecStart=/usr/bin/node /opt/recorder/server/maintenance-cli.mjs health
+UMask=0077
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/recorder
+TimeoutStartSec=300

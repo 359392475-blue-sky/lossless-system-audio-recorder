@@ -107,6 +107,7 @@ final class AudioSampleWriter: @unchecked Sendable {
         guard writer.startWriting() else {
             throw RecorderError.writerStartFailed(writer.error?.localizedDescription ?? "未知错误")
         }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         writer.startSession(atSourceTime: .zero)
     }
 

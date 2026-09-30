@@ -117,3 +117,16 @@ test('CLI cross-process lock rejects contenders without replacing current policy
   assert(successful.length>0);
   assert.equal(JSON.parse(readFileSync(f.env.POLICY_FILE)).sequence,Math.max(...successful.map(r=>r.sequence)));
 });
+
+test('HTTP resource limiter returns stable 429 without serving excess requests',async t=>{
+ const f=fixture(t);f.env.MAX_REQUESTS_PER_MINUTE='2';const s=await start(t,f);
+ assert.equal((await s.get('/health')).status,200);assert.equal((await s.get('/ready')).status,200);
+ const response=await s.get('/health');assert.equal(response.status,429);assert.equal(response.headers.get('retry-after'),'60');assert.deepEqual(await response.json(),{error:'capacity_limited'});
+});
+
+test('public information and feedback pages are reachable without leaking configuration',async t=>{
+ const f=fixture(t),server=createService(f.env);server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const origin=`http://127.0.0.1:${server.address().port}`;
+ for(const path of ['/','/privacy','/license','/support']){const r=await fetch(origin+path);assert.equal(r.status,200);assert.match(r.headers.get('content-security-policy'),/frame-ancestors 'none'/);const text=await r.text();assert.match(text,/隐私/);assert(!text.includes(f.env.ADMIN_TOKEN));assert.equal((await fetch(origin+path,{method:'HEAD'})).status,200);}
+ const support=await(await fetch(origin+'/support')).text();assert.match(support,/github.com\/359392475-blue-sky\/lossless-system-audio-recorder\/issues/);assert.match(support,/公开页面/);assert.equal((await fetch(origin+'/support',{method:'POST'})).status,405);
+});

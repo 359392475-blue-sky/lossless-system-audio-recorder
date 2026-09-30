@@ -125,8 +125,8 @@ export function createReferrals(env,{db,key,now,currentPolicy}) {
         const token=randomBytes(32).toString('base64url');db.prepare('INSERT INTO referral_tickets(id,inviter,series,expires) VALUES(?,?,?,?)').run(hmac('ticket',token),a.device,a.series,seconds()+7*86400);
         const downloadURL=new URL('/r/download?ticket='+token,origin).href,activationURL='lossless-recorder://activate?ticket='+token;
         if(req.headers.accept?.includes('application/json'))reply(res,200,{ticket:token,downloadURL,activationURL,expiresAt:seconds()+7*86400});
-        else html(res,`<h1>下载并激活</h1><p>请完整下载、安装并打开应用，再点击激活。邀请凭证七天内有效，仅可绑定一台新设备。</p><p><a href="${escape(downloadURL)}">1. 下载录音机 ZIP</a></p><p><a href="${escape(activationURL)}">2. 安装后打开录音机并激活邀请</a></p><p>若系统无法打开，请在应用中手动粘贴以下凭证：</p><textarea readonly rows="3">${token}</textarea><p>首次成功录音后才计入邀请；下载安装本身不解锁奖励。</p>`);
-      }else{if(req.method!=='GET'&&req.method!=='HEAD')fail(405,'method_not_allowed');html(res,`<h1>无损系统录音机</h1><p>好友邀请你试用。免登录，可完成五次成功录音；邀请两台新设备完整下载并首次成功录音，可解锁 ${escape(a.series)} 系列无限免费使用，仍需联网验证和升级。</p><form method="post" action="/r/${a.code}/ticket"><button>生成下载与激活凭证</button></form><p>会以不可逆处理后的设备标识和安装密钥去重，不收集音频、IP 或账户信息。凭证七天有效。</p>`,req.method==='HEAD');}
+        else html(res,`<h1>下载并激活</h1><p>请完整下载、安装并打开应用，再点击激活。邀请凭证七天内有效，仅可绑定一台新设备。</p><p><a href="${escape(downloadURL)}">1. 下载录音机 ZIP</a></p><p><a href="${escape(activationURL)}">2. 安装后打开录音机并激活邀请</a></p><p>若系统无法打开，请在应用中手动粘贴以下凭证：</p><textarea readonly rows="3">${token}</textarea><p>首次成功录音后才计入邀请；下载安装本身不解锁奖励。</p><nav><a href="/privacy">隐私说明</a> · <a href="/license">使用许可</a> · <a href="/support">反馈与权益帮助</a></nav>`);
+      }else{if(req.method!=='GET'&&req.method!=='HEAD')fail(405,'method_not_allowed');html(res,`<h1>无损系统录音机</h1><p>好友邀请你试用。免登录，可完成五次成功录音；邀请两台新设备完整下载并首次成功录音，可解锁 ${escape(a.series)} 系列无限免费使用，仍需联网验证和升级。</p><form method="post" action="/r/${a.code}/ticket"><button>生成下载与激活凭证</button></form><p>会使用去标识化设备摘要和安装密钥去重；录音留在本机，应用服务不保存 IP，但网络托管方能接触连接信息。凭证七天有效。</p><nav><a href="/privacy">隐私说明</a> · <a href="/license">使用许可</a> · <a href="/support">反馈与权益帮助</a></nav>`,req.method==='HEAD');}
     }catch(e){if(!res.headersSent)reply(res,e instanceof Failure?e.status:503,{error:e instanceof Failure?e.message:'referral_unavailable'});else res.destroy();}
     return true;
   }
@@ -137,7 +137,8 @@ export function createReferrals(env,{db,key,now,currentPolicy}) {
     const bySeries=db.prepare('SELECT series,COUNT(*) registeredDeviceSeries,COALESCE(SUM(qualified_count>=2),0) unlockedDeviceSeries FROM referral_accounts GROUP BY series ORDER BY series').all();
     return {status:'available',...tickets,...devices,...accounts,bySeries,deliveryMeaning:'Server finished sending complete SHA256-matched artifact; not proof of client save or install'};
   }
-  return {enabled:true,handle,stats,close(){}};
+  function ready(){const stat=statSync(env.REFERRAL_ARTIFACT_FILE);if(stat.size!==bytes||stat.ino!==artifactStat.ino||stat.dev!==artifactStat.dev||stat.mtimeMs!==artifactStat.mtimeMs)throw new Error('Artifact changed');db.prepare('SELECT 1 FROM referral_configuration WHERE id=1').get();}
+  return {enabled:true,handle,stats,ready,close(){}};
 }
 function reply(res,status,value){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store','Referrer-Policy':'no-referrer'});res.end(JSON.stringify(value));}
 function html(res,body,head=false){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end(head?undefined:`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>无损系统录音机邀请</title><body style="font:18px system-ui;max-width:680px;margin:60px auto;padding:24px;line-height:1.7">${body}</body></html>`);}

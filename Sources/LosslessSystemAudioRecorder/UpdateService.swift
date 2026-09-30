@@ -11,7 +11,7 @@ struct UpdateConfiguration {
               info["SUVerifyUpdateBeforeExtraction"] as? Bool == true,
               let rawURL = info["SUFeedURL"] as? String,
               let url = URL(string: rawURL), url.scheme?.lowercased() == "https",
-              let host = url.host, !host.isEmpty, url.user == nil, url.password == nil,
+              let host = url.host, !host.isEmpty, url.user == nil, url.password == nil, url.fragment == nil,
               let key = info["SUPublicEDKey"] as? String,
               let decoded = Data(base64Encoded: key), decoded.count == 32 else { return nil }
         feedURL = url
@@ -51,7 +51,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     func checkForUpdates() {
         guard let controller, isConfigured else {
-            showMessage("应用内更新尚未启用", "此构建尚未配置独立的签名更新源。录音功能可正常离线使用。")
+            showMessage("应用内更新尚未启用", "此构建尚未配置独立的签名更新源。请通过正式下载页面升级；开始新录音仍需在线验证。")
             return
         }
         guard model?.canInstallUpdate == true else {

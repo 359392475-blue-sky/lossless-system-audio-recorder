@@ -1,4 +1,5 @@
 import { createService } from './service.mjs';
+process.umask(0o077);
 try {
   const port = Number(process.env.PORT || 8787), host = process.env.HOST || '127.0.0.1';
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid port');

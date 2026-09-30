@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { readPolicy, httpsURL } from './policy.mjs';
 import { createReferrals } from './referral.mjs';
+import { validateProduction,createPrivateDatabaseFile } from './production.mjs';
+import { createLimits } from './limits.mjs';
+import { handlePublicPages } from './public-pages.mjs';
 
 export function createService(env, { fetchImpl = fetch, now = () => Date.now() } = {}) {
   for (const k of ['POLICY_FILE','POLICY_PRIVATE_KEY_FILE','STATS_DB','ADMIN_TOKEN','RELEASE_ARTIFACT_URL','RELEASE_ARTIFACT_BUILD']) if (!env[k]) throw new Error(`Required configuration: ${k}`);
@@ -16,7 +19,10 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
   const key = createPrivateKey(readFileSync(env.POLICY_PRIVATE_KEY_FILE));
   if (key.asymmetricKeyType !== 'ed25519') throw new Error('Ed25519 private key required');
   if (env.GITHUB_REPOSITORY && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY)) throw new Error('Invalid GitHub repository');
+  validateProduction(env);
+  const admit=createLimits(env);
   readPolicy(env.POLICY_FILE);
+  createPrivateDatabaseFile(env.STATS_DB);
   const db = new DatabaseSync(env.STATS_DB);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY); INSERT OR IGNORE INTO schema_version VALUES(1); CREATE TABLE IF NOT EXISTS policy_state(id INTEGER PRIMARY KEY CHECK(id=1), sequence INTEGER NOT NULL, canonical TEXT NOT NULL); CREATE TABLE IF NOT EXISTS download_entry_requests(day TEXT NOT NULL,channel TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(day,channel));');
   if (db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version > 2) { db.close(); throw new Error('Unsupported database schema'); }
@@ -65,11 +71,13 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
   const server = createServer(async (req,res) => {
     try {
       const u = new URL(req.url,'http://localhost');
+      if (!admit(req,res,u)) return;
       const head = req.method === 'HEAD';
+      if (handlePublicPages(req,res,u)) return;
       if (await referrals.handle(req,res,u)) return;
       if (!['GET','HEAD'].includes(req.method)) return json(res,405,{error:'method_not_allowed'});
       if (u.pathname === '/health') return json(res,200,{status:'alive'},head);
-      if (u.pathname === '/ready') { currentPolicy(); return json(res,200,{status:'ready'},head); }
+      if (u.pathname === '/ready') { currentPolicy(); referrals.ready?.(); return json(res,200,{status:'ready'},head); }
       if (u.pathname === '/v1/policy') {
         const build = u.searchParams.get('build'), nonce = u.searchParams.get('nonce');
         if ([...u.searchParams.keys()].some(k => !['build','nonce'].includes(k)) || u.searchParams.getAll('build').length !== 1 || u.searchParams.getAll('nonce').length !== 1 || !/^[1-9][0-9]*$/.test(build ?? '') || !Number.isSafeInteger(Number(build)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nonce ?? '')) return json(res,400,{error:'invalid_request'},head);
@@ -99,6 +107,7 @@ export function createService(env, { fetchImpl = fetch, now = () => Date.now() }
       return json(res,404,{error:'not_found'},head);
     } catch { if (!res.headersSent) json(res,503,{error:'service_unavailable'}); else res.end(); }
   });
+  server.requestTimeout=15000;server.headersTimeout=10000;server.keepAliveTimeout=5000;server.maxRequestsPerSocket=100;
   server.on('close',()=>{referrals.close();db.close();});
   return server;
 }

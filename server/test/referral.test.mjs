@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync,writeFileSync,rmSync,readFileSync } from 'node:fs';
+import { mkdtempSync,writeFileSync,rmSync,readFileSync,chmodSync,statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import { request } from 'node:http';
 import { generateKeyPairSync,createPublicKey,createHash,sign,verify,randomUUID,randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -111,6 +112,7 @@ test('pepper rotation and modified artifact rejected',async t=>{
  assert.throws(()=>createService({...f.env,REFERRAL_DEVICE_PEPPER:'q'.repeat(32)}),/pepper cannot be changed/);
  const file=readFileSync(f.env.REFERRAL_ARTIFACT_FILE);file[10]=42;writeFileSync(f.env.REFERRAL_ARTIFACT_FILE,file);
  assert.equal((await f.get('/r/download?ticket='+ticket.ticket)).status,503);
+ assert.equal((await f.get('/ready')).status,503);assert.equal((await f.get('/health')).status,200);
 });
 
 test('enabled referrals force signed upgrade for legacy build regardless of configured reminder level',async t=>{
@@ -130,4 +132,14 @@ test('initialized referral database cannot silently disable entitlement service'
  const f=await fixture(t),disabled={...f.env};
  for(const name of Object.keys(disabled))if(name.startsWith('REFERRAL_'))delete disabled[name];
  assert.throws(()=>createService(disabled),/Initialized referrals require complete configuration/);
+});
+
+test('production ops check accepts a private matching test manifest and rejects wrong metadata',async t=>{
+ const f=await fixture(t),manifestPath=join(f.env.REFERRAL_ARTIFACT_FILE+'-manifest.json');
+ for(const path of [f.env.POLICY_FILE,f.env.POLICY_PRIVATE_KEY_FILE,f.env.REFERRAL_ARTIFACT_FILE])chmodSync(path,0o600);
+ const manifest={schema:1,product:'lossless-system-audio-recorder',version:'3.2.0',build:6,sha256:f.env.REFERRAL_ARTIFACT_SHA256,bytes:statSync(f.env.REFERRAL_ARTIFACT_FILE).size,bundleID:'app.lowpower.lossless-system-audio-recorder',policyPublicKey:createPublicKey(readFileSync(f.env.POLICY_PRIVATE_KEY_FILE)).export({format:'der',type:'spki'}).subarray(-32).toString('base64'),signingTeamID:'TESTTEAM00',notarizationID:randomUUID()};
+ writeFileSync(manifestPath,JSON.stringify(manifest),{mode:0o600});
+ const run=()=>spawnSync(process.execPath,[new URL('../ops.mjs',import.meta.url).pathname,'check'],{env:{...process.env,...f.env,NODE_ENV:'production',RELEASE_MANIFEST_FILE:manifestPath},encoding:'utf8'});
+ let result=run();assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout).publicDeploymentVerified,false);
+ manifest.build=7;writeFileSync(manifestPath,JSON.stringify(manifest));result=run();assert.equal(result.status,1);assert(!result.stderr.includes(f.env.ADMIN_TOKEN));
 });

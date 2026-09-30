@@ -4,6 +4,7 @@ import XCTest
 final class UpdateSafetyTests: XCTestCase {
     func testMissingOrInvalidConfigurationRemainsOffline() {
         XCTAssertNil(UpdateConfiguration(info: [:]))
+        XCTAssertNil(UpdateConfiguration(info: ["SURequireSignedFeed": true, "SUVerifyUpdateBeforeExtraction": true, "SUFeedURL": "https://example.invalid/feed.xml#fragment", "SUPublicEDKey": Data(repeating: 1, count: 32).base64EncodedString()]))
         XCTAssertNil(UpdateConfiguration(info: ["SUFeedURL": "https://example.invalid/feed.xml", "SUPublicEDKey": Data(repeating: 1, count: 32).base64EncodedString()]))
         XCTAssertNil(UpdateConfiguration(info: ["SURequireSignedFeed": true, "SUVerifyUpdateBeforeExtraction": true, "SUFeedURL": "https://example.invalid/feed.xml"]))
         XCTAssertNil(UpdateConfiguration(info: ["SURequireSignedFeed": true, "SUVerifyUpdateBeforeExtraction": true, "SUFeedURL": "http://example.invalid/feed.xml", "SUPublicEDKey": Data(repeating: 1, count: 32).base64EncodedString()]))

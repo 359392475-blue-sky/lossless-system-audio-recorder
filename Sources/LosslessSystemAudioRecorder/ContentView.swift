@@ -26,7 +26,7 @@ struct ContentView: View {
         .frame(width: 470)
         .frame(minHeight: 430)
         .preferredColorScheme(.dark)
-        .task { await model.refreshPolicy() }
+        .task { await model.recoverRecordings(); await model.refreshPolicy() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refreshPolicy() }
         }
@@ -179,7 +179,7 @@ struct ContentView: View {
                 Button("在 Finder 中显示") { model.reveal(url) }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                if url.path.hasPrefix(FileManager.default.temporaryDirectory.path) {
+                if model.hasPendingRecording {
                     Button("再次导出") { model.exportAgain() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
@@ -192,10 +192,12 @@ struct ContentView: View {
                     .tint(.purple)
             case .failed:
                 if model.hasPendingRecording { Button("再次导出") { model.exportAgain() } }
-                Button("打开权限设置") { model.openScreenRecordingSettings() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                Button(model.updateInProgress ? "更新待安装" : "重新尝试") { model.start() }
+                if !model.hasPendingRecording, model.policyError == nil {
+                    Button("打开权限设置") { model.openScreenRecordingSettings() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                }
+                Button(model.updateInProgress ? "更新待安装" : (model.hasPendingRecording ? "再次录制" : "重新尝试")) { model.recordAgain() }
                     .disabled(model.updateInProgress)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -225,7 +227,7 @@ struct ContentView: View {
 
     private var footer: some View {
         HStack {
-            Label("MP4 · ALAC 无损 · 立体声", systemImage: "checkmark.seal")
+            Label("MP4 · ALAC 无损", systemImage: "checkmark.seal")
             Spacer()
             Label("不录麦克风", systemImage: "mic.slash")
         }
@@ -248,7 +250,7 @@ struct ContentView: View {
         case .finished:
             return "录音已完成"
         case .failed:
-            return "没有完成录制"
+            return model.hasPendingRecording ? "录音已保留，导出未完成" : "没有完成录制"
         }
     }
 
@@ -265,7 +267,7 @@ struct ContentView: View {
         case .exporting:
             return "正在封装并验证 ALAC 音频轨道"
         case let .finished(url, summary):
-            return "\(formatSize(summary.fileSize)) · \(url.lastPathComponent)"
+            return "\(summary.formatDescription) · \(formatSize(summary.fileSize))\n\(model.hasPendingRecording ? "尚未导出，已保留" : url.lastPathComponent)\(model.recoveryCount > 1 ? " · 待保存 \(model.recoveryCount) 段" : "")"
         case let .failed(message):
             return message
         }
@@ -329,6 +331,7 @@ private struct ReferralPanel: View {
                     }.disabled(coordinator.checking || activationTicket.isEmpty)
                 }
             }
+            Button("复制排查信息", action: coordinator.copySupportInfo).font(.caption)
             if coordinator.checking { ProgressView().controlSize(.small) }
             if let message = coordinator.message {
                 Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -1,0 +1,9 @@
+[Unit]
+Description=Recorder backup schedule
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=300
+Persistent=true
+Unit=recorder-backup.service
+[Install]
+WantedBy=timers.target

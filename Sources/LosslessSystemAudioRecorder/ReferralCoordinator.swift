@@ -96,6 +96,19 @@ final class ReferralCoordinator: ObservableObject {
         await claim(ticket)
     }
 
+    func copySupportInfo() {
+        guard let reference = service.supportReference ?? status?.publicKey else {
+            message = "尚未取得设备支持码，请先重试联网验证。"; return
+        }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let operations = (try? journal.read())?.map { "\($0.id):\($0.state.rawValue)" }.joined(separator: "\n") ?? "unavailable"
+        let text = "无损系统录音机 \(version) (\(build))\n设备支持码：\(reference)\n待结算操作：\n\(operations)\n提示：\(message ?? "无")"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        message = "排查信息已复制，请私下提供给维护者；不包含录音或原始硬件标识。"
+    }
+
     func copyShareLink() {
         guard let url = status?.shareURL else { return }
         NSPasteboard.general.clearContents()
